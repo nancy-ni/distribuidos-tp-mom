@@ -13,13 +13,19 @@ func CreateQueueMiddleware(queueName string, connectionSettings m.ConnSettings) 
 	if err != nil {
 		return nil, err
 	}
-	channel, err := conn.Channel()
+	sendChannel, err := conn.Channel()
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
+	recvChannel, err := conn.Channel()
+	if err != nil {
+		sendChannel.Close()
+		conn.Close()
+		return nil, err
+	}
 
-	_, err = channel.QueueDeclare(
+	_, err = sendChannel.QueueDeclare(
 		queueName,
 		true,
 		false,
@@ -28,12 +34,13 @@ func CreateQueueMiddleware(queueName string, connectionSettings m.ConnSettings) 
 		nil,
 	)
 	if err != nil {
-		channel.Close()
+		sendChannel.Close()
+		recvChannel.Close()
 		conn.Close()
 		return nil, err
 	}
 
-	return queue.NewQueueMiddleware(conn, channel, queueName), nil
+	return queue.NewQueueMiddleware(conn, sendChannel, recvChannel, queueName), nil
 }
 
 func CreateExchangeMiddleware(exchange string, keys []string, connectionSettings m.ConnSettings) (m.Middleware, error) {

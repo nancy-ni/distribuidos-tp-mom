@@ -1,28 +1,35 @@
 package queue
 
 import (
+	"sync"
+
 	m "github.com/7574-sistemas-distribuidos/tp-mom/golang/internal/middleware"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type QueueMiddleware struct {
-	conn      *amqp.Connection
-	channel   *amqp.Channel
-	queueName string
+	conn        *amqp.Connection
+	sendChannel *amqp.Channel
+	recvChannel *amqp.Channel
+	queueName   string
+	isConsuming bool
+	lock        sync.Mutex
 }
 
-func NewQueueMiddleware(conn *amqp.Connection, channel *amqp.Channel, queueName string) *QueueMiddleware {
+func NewQueueMiddleware(conn *amqp.Connection, sendChannel *amqp.Channel, recvChannel *amqp.Channel, queueName string) *QueueMiddleware {
 	return &QueueMiddleware{
-		conn:      conn,
-		channel:   channel,
-		queueName: queueName,
+		conn:        conn,
+		sendChannel: sendChannel,
+		recvChannel: recvChannel,
+		queueName:   queueName,
+		isConsuming: false,
 	}
 }
 
 func (qm *QueueMiddleware) Send(msg m.Message) error {
 	body := []byte(msg.Body)
 
-	err := qm.channel.Publish(
+	err := qm.sendChannel.Publish(
 		"",
 		qm.queueName,
 		false,
@@ -30,7 +37,7 @@ func (qm *QueueMiddleware) Send(msg m.Message) error {
 		amqp.Publishing{ContentType: "application/json", Body: body},
 	)
 	if err != nil {
-		if qm.channel.IsClosed() {
+		if qm.sendChannel.IsClosed() {
 			return m.ErrMessageMiddlewareDisconnected
 		}
 		return m.ErrMessageMiddlewareMessage
@@ -39,8 +46,15 @@ func (qm *QueueMiddleware) Send(msg m.Message) error {
 }
 
 func (qm *QueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack func(), nack func())) error {
+	qm.lock.Lock()
+	defer qm.lock.Unlock()
+
+	if qm.isConsuming {
+		return m.ErrMessageMiddlewareMessage
+	}
+
 	consumerTag := qm.getConsumerTag()
-	msgs, err := qm.channel.Consume(
+	msgs, err := qm.recvChannel.Consume(
 		qm.queueName,
 		consumerTag,
 		false,
@@ -50,11 +64,13 @@ func (qm *QueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack f
 		nil,
 	)
 	if err != nil {
-		if qm.channel.IsClosed() {
+		if qm.recvChannel.IsClosed() {
 			return m.ErrMessageMiddlewareDisconnected
 		}
 		return m.ErrMessageMiddlewareMessage
 	}
+
+	qm.isConsuming = true
 
 	go func() {
 		for d := range msgs {
@@ -70,16 +86,33 @@ func (qm *QueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack f
 }
 
 func (qm *QueueMiddleware) StopConsuming() error {
+	qm.lock.Lock()
+	defer qm.lock.Unlock()
+
+	if !qm.isConsuming {
+		return nil
+	}
+
 	consumerTag := qm.getConsumerTag()
-	err := qm.channel.Cancel(consumerTag, false)
+	err := qm.recvChannel.Cancel(consumerTag, false)
 	if err != nil {
 		return m.ErrMessageMiddlewareDisconnected
 	}
+
+	qm.isConsuming = false
 	return nil
 }
 
 func (qm *QueueMiddleware) Close() error {
-	err := qm.channel.Close()
+	err := qm.sendChannel.Close()
+	if err != nil {
+		return m.ErrMessageMiddlewareClose
+	}
+	err = qm.recvChannel.Close()
+	if err != nil {
+		return m.ErrMessageMiddlewareClose
+	}
+	err = qm.conn.Close()
 	if err != nil {
 		return m.ErrMessageMiddlewareClose
 	}
