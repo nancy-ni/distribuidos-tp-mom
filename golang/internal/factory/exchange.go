@@ -33,8 +33,8 @@ func (em *ExchangeMiddleware) Send(msg m.Message) error {
 		err := em.sendChannel.Publish(
 			em.exchange,
 			routingKey,
-			false,
-			false,
+			false, // mandatory
+			false, // inmediate
 			amqp.Publishing{
 				ContentType: "application/json",
 				Body:        body,
@@ -53,12 +53,12 @@ func (em *ExchangeMiddleware) Send(msg m.Message) error {
 func (em *ExchangeMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack func(), nack func())) error {
 	msgs, err := em.recvChannel.Consume(
 		em.queueName,
-		"",
-		false,
-		false,
-		false,
-		false,
-		nil,
+		"",    // consumerTag
+		false, // autoack
+		false, // exclusive
+		false, // nolocal
+		false, // nowait
+		nil,   // args
 	)
 	if err != nil {
 		if em.recvChannel.IsClosed() {

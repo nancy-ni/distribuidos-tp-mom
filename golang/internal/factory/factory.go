@@ -26,11 +26,11 @@ func CreateQueueMiddleware(queueName string, connectionSettings m.ConnSettings) 
 
 	_, err = sendChannel.QueueDeclare(
 		queueName,
-		true,
-		false,
-		false,
-		false,
-		nil,
+		true,  // durable
+		false, // autodelete
+		false, // exclusive
+		false, // nowait
+		nil,   // args
 	)
 	if err != nil {
 		sendChannel.Close()
@@ -62,11 +62,11 @@ func CreateExchangeMiddleware(exchange string, keys []string, connectionSettings
 	err = sendChannel.ExchangeDeclare(
 		exchange,
 		"topic",
-		true,
-		false,
-		false,
-		false,
-		nil,
+		true,  // durable
+		false, // autodelete
+		false, // internal
+		false, // nowait
+		nil,   // args
 	)
 	if err != nil {
 		recvChannel.Close()
@@ -76,12 +76,12 @@ func CreateExchangeMiddleware(exchange string, keys []string, connectionSettings
 	}
 
 	q, err := recvChannel.QueueDeclare(
-		"",
-		false,
-		true,
-		true,
-		false,
-		nil,
+		"",    // name
+		false, // durable
+		true,  // autodelete
+		true,  // exclusive
+		false, // nowait
+		nil,   // args
 	)
 	if err != nil {
 		recvChannel.Close()
@@ -95,8 +95,8 @@ func CreateExchangeMiddleware(exchange string, keys []string, connectionSettings
 			q.Name,
 			routingKey,
 			exchange,
-			false,
-			nil,
+			false, // nowait
+			nil,   // args
 		)
 		if err != nil {
 			recvChannel.Close()

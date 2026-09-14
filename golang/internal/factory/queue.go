@@ -28,8 +28,8 @@ func (qm *QueueMiddleware) Send(msg m.Message) error {
 	err := qm.sendChannel.Publish(
 		"",
 		qm.queueName,
-		false,
-		false,
+		false, // mandatory
+		false, // inmediate
 		amqp.Publishing{
 			ContentType: "application/json",
 			Body:        body,
@@ -47,12 +47,12 @@ func (qm *QueueMiddleware) Send(msg m.Message) error {
 func (qm *QueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack func(), nack func())) error {
 	msgs, err := qm.recvChannel.Consume(
 		qm.queueName,
-		"",
-		false,
-		false,
-		false,
-		false,
-		nil,
+		"",    // consumerTag
+		false, // autoack
+		false, // exclusive
+		false, // nolocal
+		false, // nowait
+		nil,   // args
 	)
 	if err != nil {
 		if qm.recvChannel.IsClosed() {
