@@ -16,12 +16,14 @@ type ExchangeMiddleware struct {
 }
 
 func NewExchangeMiddleware(conn *amqp.Connection, sendChannel *amqp.Channel, recvChannel *amqp.Channel, exchange string, queueName string, keys []string) *ExchangeMiddleware {
+	consumerTag := generateNewConsumerTag(exchange)
 	return &ExchangeMiddleware{
 		conn:        conn,
 		sendChannel: sendChannel,
 		recvChannel: recvChannel,
 		exchange:    exchange,
 		queueName:   queueName,
+		consumerTag: consumerTag,
 		keys:        keys,
 	}
 }
@@ -68,9 +70,6 @@ func (em *ExchangeMiddleware) StartConsuming(callbackFunc func(msg m.Message, ac
 	}
 
 	for d := range msgs {
-		if em.consumerTag == "" {
-			em.consumerTag = d.ConsumerTag
-		}
 		msg := m.Message{Body: string(d.Body)}
 
 		ack := func() { d.Ack(false) }
@@ -82,9 +81,6 @@ func (em *ExchangeMiddleware) StartConsuming(callbackFunc func(msg m.Message, ac
 }
 
 func (em *ExchangeMiddleware) StopConsuming() error {
-	if em.consumerTag == "" {
-		return m.ErrMessageMiddlewareClose
-	}
 	err := em.recvChannel.Cancel(em.consumerTag, false)
 	if err != nil {
 		return m.ErrMessageMiddlewareDisconnected
