@@ -1,8 +1,6 @@
-package queue
+package factory
 
 import (
-	"sync"
-
 	m "github.com/7574-sistemas-distribuidos/tp-mom/golang/internal/middleware"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -12,8 +10,7 @@ type QueueMiddleware struct {
 	sendChannel *amqp.Channel
 	recvChannel *amqp.Channel
 	queueName   string
-	isConsuming bool
-	lock        sync.Mutex
+	consumerTag string
 }
 
 func NewQueueMiddleware(conn *amqp.Connection, sendChannel *amqp.Channel, recvChannel *amqp.Channel, queueName string) *QueueMiddleware {
@@ -22,7 +19,6 @@ func NewQueueMiddleware(conn *amqp.Connection, sendChannel *amqp.Channel, recvCh
 		sendChannel: sendChannel,
 		recvChannel: recvChannel,
 		queueName:   queueName,
-		isConsuming: false,
 	}
 }
 
@@ -34,7 +30,10 @@ func (qm *QueueMiddleware) Send(msg m.Message) error {
 		qm.queueName,
 		false,
 		false,
-		amqp.Publishing{ContentType: "application/json", Body: body},
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        body,
+		},
 	)
 	if err != nil {
 		if qm.sendChannel.IsClosed() {
@@ -46,17 +45,9 @@ func (qm *QueueMiddleware) Send(msg m.Message) error {
 }
 
 func (qm *QueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack func(), nack func())) error {
-	qm.lock.Lock()
-	defer qm.lock.Unlock()
-
-	if qm.isConsuming {
-		return m.ErrMessageMiddlewareMessage
-	}
-
-	consumerTag := qm.getConsumerTag()
 	msgs, err := qm.recvChannel.Consume(
 		qm.queueName,
-		consumerTag,
+		"",
 		false,
 		false,
 		false,
@@ -70,36 +61,28 @@ func (qm *QueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack f
 		return m.ErrMessageMiddlewareMessage
 	}
 
-	qm.isConsuming = true
-
-	go func() {
-		for d := range msgs {
-			msg := m.Message{Body: string(d.Body)}
-
-			ack := func() { d.Ack(false) }
-			nack := func() { d.Nack(false, true) }
-
-			callbackFunc(msg, ack, nack)
+	for d := range msgs {
+		if qm.consumerTag == "" {
+			qm.consumerTag = d.ConsumerTag
 		}
-	}()
+		msg := m.Message{Body: string(d.Body)}
+
+		ack := func() { d.Ack(false) }
+		nack := func() { d.Nack(false, true) }
+
+		callbackFunc(msg, ack, nack)
+	}
 	return nil
 }
 
 func (qm *QueueMiddleware) StopConsuming() error {
-	qm.lock.Lock()
-	defer qm.lock.Unlock()
-
-	if !qm.isConsuming {
-		return nil
+	if qm.consumerTag == "" {
+		return m.ErrMessageMiddlewareClose
 	}
-
-	consumerTag := qm.getConsumerTag()
-	err := qm.recvChannel.Cancel(consumerTag, false)
+	err := qm.recvChannel.Cancel(qm.consumerTag, false)
 	if err != nil {
 		return m.ErrMessageMiddlewareDisconnected
 	}
-
-	qm.isConsuming = false
 	return nil
 }
 
@@ -117,8 +100,4 @@ func (qm *QueueMiddleware) Close() error {
 		return m.ErrMessageMiddlewareClose
 	}
 	return nil
-}
-
-func (qm *QueueMiddleware) getConsumerTag() string {
-	return "consumer-tag-" + qm.queueName
 }
