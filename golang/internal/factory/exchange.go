@@ -1,6 +1,7 @@
 package factory
 
 import (
+	common "github.com/7574-sistemas-distribuidos/tp-mom/golang/internal/factory/common"
 	m "github.com/7574-sistemas-distribuidos/tp-mom/golang/internal/middleware"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -16,7 +17,7 @@ type ExchangeMiddleware struct {
 }
 
 func NewExchangeMiddleware(conn *amqp.Connection, sendChannel *amqp.Channel, recvChannel *amqp.Channel, exchange string, queueName string, keys []string) *ExchangeMiddleware {
-	consumerTag := generateNewConsumerTag(exchange)
+	consumerTag := common.GenerateNewConsumerTag(exchange)
 	return &ExchangeMiddleware{
 		conn:        conn,
 		sendChannel: sendChannel,
@@ -70,12 +71,7 @@ func (em *ExchangeMiddleware) StartConsuming(callbackFunc func(msg m.Message, ac
 	}
 
 	for d := range msgs {
-		msg := m.Message{Body: string(d.Body)}
-
-		ack := func() { d.Ack(false) }
-		nack := func() { d.Nack(false, true) }
-
-		callbackFunc(msg, ack, nack)
+		common.ProcessDelivery(d, callbackFunc)
 	}
 	return nil
 }
@@ -89,17 +85,5 @@ func (em *ExchangeMiddleware) StopConsuming() error {
 }
 
 func (em *ExchangeMiddleware) Close() error {
-	err := em.sendChannel.Close()
-	if err != nil {
-		return m.ErrMessageMiddlewareClose
-	}
-	err = em.recvChannel.Close()
-	if err != nil {
-		return m.ErrMessageMiddlewareClose
-	}
-	err = em.conn.Close()
-	if err != nil {
-		return m.ErrMessageMiddlewareClose
-	}
-	return nil
+	return common.CloseAllResources(em.conn, em.sendChannel, em.recvChannel)
 }

@@ -1,6 +1,7 @@
 package factory
 
 import (
+	common "github.com/7574-sistemas-distribuidos/tp-mom/golang/internal/factory/common"
 	m "github.com/7574-sistemas-distribuidos/tp-mom/golang/internal/middleware"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -14,7 +15,7 @@ type QueueMiddleware struct {
 }
 
 func NewQueueMiddleware(conn *amqp.Connection, sendChannel *amqp.Channel, recvChannel *amqp.Channel, queueName string) *QueueMiddleware {
-	consumerTag := generateNewConsumerTag(queueName)
+	consumerTag := common.GenerateNewConsumerTag(queueName)
 	return &QueueMiddleware{
 		conn:        conn,
 		sendChannel: sendChannel,
@@ -64,12 +65,7 @@ func (qm *QueueMiddleware) StartConsuming(callbackFunc func(msg m.Message, ack f
 	}
 
 	for d := range msgs {
-		msg := m.Message{Body: string(d.Body)}
-
-		ack := func() { d.Ack(false) }
-		nack := func() { d.Nack(false, true) }
-
-		callbackFunc(msg, ack, nack)
+		common.ProcessDelivery(d, callbackFunc)
 	}
 	return nil
 }
@@ -83,17 +79,5 @@ func (qm *QueueMiddleware) StopConsuming() error {
 }
 
 func (qm *QueueMiddleware) Close() error {
-	err := qm.sendChannel.Close()
-	if err != nil {
-		return m.ErrMessageMiddlewareClose
-	}
-	err = qm.recvChannel.Close()
-	if err != nil {
-		return m.ErrMessageMiddlewareClose
-	}
-	err = qm.conn.Close()
-	if err != nil {
-		return m.ErrMessageMiddlewareClose
-	}
-	return nil
+	return common.CloseAllResources(qm.conn, qm.sendChannel, qm.recvChannel)
 }
